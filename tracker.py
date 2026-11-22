@@ -52,7 +52,9 @@ class ExpenseTracker:
         try:
             with open(self.data_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return data if isinstance(data, list) else []
+            if not isinstance(data, list):
+                raise ValueError("expenses.json must contain a list of expenses.")
+            return data
         except (json.JSONDecodeError, OSError):
             # keep the unreadable file instead of overwriting it with an empty list later
             backup = self.data_file.with_name(self.data_file.name + ".bak")
@@ -139,6 +141,8 @@ class ExpenseTracker:
             start_date = _validate_date(start_date)
         if end_date:
             end_date = _validate_date(end_date)
+        if start_date and end_date and start_date > end_date:
+            raise ValueError("Start date must be on or before end date.")
         results = []
         for e in self.expenses:
             if category and e.get("category", "").lower() != category.lower():
@@ -317,7 +321,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Optional[List[str]] = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
-    tracker = ExpenseTracker()
+    try:
+        tracker = ExpenseTracker()
+    except ValueError as exc:
+        parser.exit(1, f"Error: {exc}\n")
     args.func(args, tracker)
 
 

@@ -3,6 +3,8 @@
 Run with:  python test_tracker.py   (or: pytest)
 """
 
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -19,11 +21,12 @@ def expect_value_error(function, *args, **kwargs):
 
 def test_add_and_list():
     with tempfile.TemporaryDirectory() as tmp:
-        tracker = ExpenseTracker(Path(tmp) / "expenses.json")
+        data_file = Path(tmp) / "expenses.json"
+        tracker = ExpenseTracker(data_file)
         tracker.add(10.00, "Food", "Sandwich", date="2026-01-01")
         tracker.add(5.50, "Transport", "Bus", date="2026-01-02")
 
-        expenses = tracker.list_all()
+        expenses = ExpenseTracker(data_file).list_all()
         assert len(expenses) == 2
         amounts = {e["amount"] for e in expenses}
         assert amounts == {10.00, 5.50}
@@ -115,6 +118,47 @@ def test_export_csv():
         assert lines[1] == "1,2026-01-01,Food,1.5,a"
 
 
+def test_filter_rejects_reversed_dates_and_includes_boundaries():
+    with tempfile.TemporaryDirectory() as tmp:
+        tracker = ExpenseTracker(Path(tmp) / "expenses.json")
+        tracker.add(5, "Food", "Start", date="2026-01-01")
+        tracker.add(8, "Food", "End", date="2026-02-01")
+
+        expect_value_error(
+            tracker.filter_expenses,
+            start_date="2026-02-01",
+            end_date="2026-01-01",
+        )
+
+        expenses = tracker.filter_expenses(
+            start_date="2026-01-01",
+            end_date="2026-02-01",
+        )
+        assert [expense["description"] for expense in expenses] == ["End", "Start"]
+
+
+def test_add_preserves_json_with_unexpected_structure():
+    with tempfile.TemporaryDirectory() as tmp:
+        temp_dir = Path(tmp)
+        tracker_script = temp_dir / "tracker.py"
+        tracker_script.write_bytes(Path(__file__).with_name("tracker.py").read_bytes())
+
+        data_file = temp_dir / "expenses.json"
+        original = b'{"legacy_record": 123}'
+        data_file.write_bytes(original)
+
+        result = subprocess.run(
+            [sys.executable, str(tracker_script), "add", "5", "Food", "Test"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        assert result.returncode == 1
+        assert "expenses.json must contain a list of expenses." in result.stderr
+        assert data_file.read_bytes() == original
+
+
 if __name__ == "__main__":
     test_add_and_list()
     test_delete()
@@ -124,4 +168,6 @@ if __name__ == "__main__":
     test_filter_by_category_and_dates()
     test_unreadable_file_is_kept_as_backup()
     test_export_csv()
+    test_filter_rejects_reversed_dates_and_includes_boundaries()
+    test_add_preserves_json_with_unexpected_structure()
     print("All tests passed!")
